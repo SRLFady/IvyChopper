@@ -1,0 +1,364 @@
+program FadyIvyChopOMatic;
+{$DEFINE SMART}
+{$I SRL-6/SRL.Simba}
+{$i SRL-6/LIB/MISC/SRLPLAYERFORM.simba}
+
+{*
+               JUST PRESS PLAY AND FILL OUT THE FORM
+               JUST PRESS PLAY AND FILL OUT THE FORM
+               JUST PRESS PLAY AND FILL OUT THE FORM
+               JUST PRESS PLAY AND FILL OUT THE FORM
+               JUST PRESS PLAY AND FILL OUT THE FORM
+               JUST PRESS PLAY AND FILL OUT THE FORM
+               JUST PRESS PLAY AND FILL OUT THE FORM
+               JUST PRESS PLAY AND FILL OUT THE FORM
+                                                                     *}
+
+const
+
+Local_Version := 1.0;
+
+{* Only Modify the following Constants if there is a problem with the colors *}
+
+{*Varrock Ivy data*}
+  VarrockCol := 3178574;
+  VarrockTol := 15;
+  VarrockHue := 0.22;
+  VarrockSat := 0.25;
+
+{*Taverly Ivy data*}
+  TaverlyCol := 4039243;
+  TaverlyTol := 21;
+  TaverlyHue := 0.09;
+  TaverlySat := 0.70;
+
+  {*Everywhere else Ivy data*}
+  ElseCol := 3829844;
+  ElseTol := 16;
+  ElseHue := 0.04;
+  ElseSat := 0.14;
+
+Type TIvyLocation = record
+  LocationName: String;
+  Color, Tol, Direction: Integer;
+  ColSettings: TColorSettings;
+end;
+
+var
+  IvyChopped, XPTicker, B, BreakTime, Antibans, AB, StartXP: integer;
+  ScriptTimer: TTimeMarker;
+  IvyLocation: TIvyLocation;
+
+procedure initPlayerForm();
+begin
+  with playerForm do
+  begin
+    name := 'Ivy Chop-O-Matic';
+    scriptHelpThread := 'https://villavu.com/forum/showthread.php?t=114228';
+
+    editBoxLabels := ['Preferred World','Play time Till Break','Break Duration','Antiban Chance'];
+    editBoxDefaults := ['0','60','10','10'];
+    editBoxHints := [
+    'Pick a world or 0 for random or -1 for "Play Now"',
+    'Amount of time in minutes till a break is called',
+    'How long you want your breaks to be, also in minutes',
+    'Antiban chance per 1.5-3 seconds 0..1000, where 1 is 0.1% and 1000 is 100%'];
+
+    checkBoxLabels := ['Disable SRL Debug?', 'Disable Script Debug?'];
+    checkBoxDefaults := ['True','True'];
+    checkBoxHints := [
+    'Do you want to Disable SRL Debug?',
+    'Do you want to Disable the Script Debug?'];
+
+    comboBoxLabels := ['Location'];
+    comboBoxDefaults := ['Taverly'];
+    comboBoxItems := [['N Falador','S Falador','Taverly','East Ardougne','N Varrock','E Varrock','Yanille','Castle Wars']];
+    comboBoxHints := ['Where are we chopping Ivy?'];
+
+  end;
+end;
+
+procedure declarePlayers();
+var
+  i: integer;
+begin
+  players.setup(playerForm.players);
+  currentPlayer := 0;
+
+  for i := 0 to high(players) do
+    with players[i] do
+    begin
+      integers[0] := strToInt(playerForm.players[i].settings[0]);
+      integers[1] := strToInt(playerForm.players[i].settings[1]);
+      integers[2] := strToInt(playerForm.players[i].settings[2]);
+      integers[3] := strToInt(playerForm.players[i].settings[3]);
+
+      booleans[0] := strToBool(playerForm.players[i].settings[4]);
+      booleans[1] := strToBool(playerForm.players[i].settings[5]);
+
+      strings[0] := playerForm.players[i].settings[6];
+
+      world := integers[0];
+    end;
+end;
+
+procedure sDebug(Text: string);
+begin
+  if not players[currentPlayer].booleans[1] then
+    writeLn(Text);
+end;
+
+procedure TIvyLocation.init(_LocationName: String; _Color, _Tol, _Direction: Integer; _ColSettings: TColorSettings);
+begin
+  Self.LocationName := _LocationName;
+  Self.Color := _Color;
+  Self.Tol := _Tol;
+  Self.Direction := _Direction;
+  Self.ColSettings := _ColSettings
+end;
+
+procedure resetBreakTimer();                //Adapted from The Mayor's VEB Miner
+var
+  ran: Integer;
+begin
+  ran := round((players[currentPlayer].integers[1] * 60000) * 0.1);
+  BreakTime := (getSystemTime() + (players[currentPlayer].integers[1] * 60000) + randomRange(-ran, ran));
+end;
+
+procedure progressReport();
+begin
+  clearDebug();
+  writeLn('Ivy Chopped: ' + toStr(IvyChopped)+ ', Chopped/H: ' +toStr(round(IvyChopped/(ScriptTimer.getTime()/3600000))));
+  writeLn('XP Gained: ' +toStr(XPTicker*332.5)+ ', XP/H: '+toStr(round((XPTicker*332.5)/(ScriptTimer.getTime()/3600000))));
+  writeLn('Antibans Done: ' + toStr(Antibans));
+  writeLn('Time Running: ' +timeRunning);
+  writeLn('Breaks Taken: ' +toStr(B));
+end;
+
+procedure whichLocation();
+begin
+  case players[currentPlayer].strings[0] of
+    'N Falador' : IvyLocation.init('North Falador Wall',ElseCol,ElseTol,MM_DIRECTION_SOUTH,ColorSetting(2,ElseHue,ElseSat));
+    'S Falador' : IvyLocation.init('South Falador Wall',ElseCol,ElseTol,MM_DIRECTION_NORTH,ColorSetting(2,ElseHue,ElseSat));
+    'East Ardougne' : IvyLocation.init('East Ardougne Church',ElseCol,ElseTol,MM_DIRECTION_EAST,ColorSetting(2,ElseHue,ElseSat));
+    'N Varrock' : IvyLocation.init('North Varrock Palace',VarrockCol,VarrockTol,MM_DIRECTION_SOUTH,ColorSetting(2,VarrockHue,VarrockSat));
+    'E Varrock' : IvyLocation.init('East Varrock Palace',VarrockCol,VarrockTol,MM_DIRECTION_WEST,ColorSetting(2,VarrockHue,VarrockSat));
+    'Yanille' : IvyLocation.init('Yanille North Wall',ElseCol,ElseTol,MM_DIRECTION_SOUTH,ColorSetting(2,ElseHue,ElseSat));
+    'Castle Wars' : IvyLocation.init('Castle Wars',ElseCol,ElseTol,MM_DIRECTION_NORTH,ColorSetting(2,ElseHue,ElseSat));
+    'Taverly': IvyLocation.init('Taverly',TaverlyCol,TaverlyTol,MM_DIRECTION_WEST,ColorSetting(2,TaverlyHue,TaverlySat));
+  end;
+end;
+
+procedure loginProcedure();
+begin
+  if not isLoggedin() then
+  begin
+    players[currentPlayer].login();   // Log them in
+    wait(gaussRangeInt(1000,1500));
+  end;
+  closePollWindow();
+  exitTreasure();            // Exit treasure hunter
+  minimap.setAngle(IvyLocation.Direction);
+  mainscreen.setAngle(MS_ANGLE_HIGH);
+end;
+
+function antiBan(): Boolean;
+begin
+  if (AB > 2) then
+    exit;
+  if (randomRange(1,1001) <= players[currentPlayer].integers[3]) then
+  begin
+    sDebug('Doing Antiban');
+    inc(AB);
+    inc(Antibans);
+    result:= true;
+    case random(45) of
+      0, 2:
+        hoverSkill(SKILL_WOODCUTTING);
+      3..22:
+        pickUpMouse();
+      23..28:
+        sleepAndMoveMouse(randomRange(500, 3000));
+      29..36:
+        wait(randomRange(777, 5000));
+      37:
+        smallRandomMouse();
+      38:
+      begin
+        writeLn('Starting mini break.');
+        wait(randomRange(9001, 25000));
+        writeLn('Finished mini break.');
+      end;
+      39..44:
+        randomCompass(15,35,true);
+    end;
+  end;
+end;
+
+function ivyClicker(): Boolean;
+var
+  x, y, i: integer;
+  ATPA: T2DPointArray;
+  TPA: TPointArray;
+begin
+  if not isLoggedIn() then
+    exit();
+  sDebug('Looking for Ivy Colors');
+  findColorsSpiralTolerance(x, y, TPA, IvyLocation.Color, mainScreen.getBounds(), IvyLocation.Tol, IvyLocation.ColSettings);
+
+  if (Length(TPA) < 1) then
+  begin
+    sDebug('Did not find enough Ivy Colors');
+    exit;
+  end;
+
+  ATPA := TPA.cluster(5);
+  ATPA.sortFromMidPoint(mainScreen.playerPoint);
+  FilterTPAsBetween(ATPA,1,110);
+
+  if (Length(ATPA) < 1) then
+  begin
+    sDebug('Sorting the Ivy Colors returned no results');
+    exit;
+  end;
+
+  for i := 0 to high(ATPA) do
+  begin
+    mouse(ATPA[i].getBounds().getRandomPoint());
+    wait(gaussRangeInt(60,130));
+    if isMouseOverText(['hop Ivy']) then
+    begin
+      sDebug('Found an Ivy');
+      fastClick(MOUSE_LEFT);
+      result := True;
+      break;
+    end;
+  end;
+end;
+
+procedure ivyChopper();
+begin
+  StartXP := chatbox.getXPBar();
+  if waitFunc(@ivyClicker,gaussRangeInt(100,500),gaussRangeInt(15000,20000)) then
+  begin
+    repeat
+      wait(gaussRangeInt(1500,2500));
+      antiban();
+      if (StartXP <> chatbox.getXPBar) then
+      begin
+        inc(XPTicker);
+        StartXP := chatbox.getXPBar();
+        progressReport();
+      end;
+    until (countColorTolerance(IvyLocation.Color,mainscreen.playerBox,IvyLocation.Tol,IvyLocation.ColSettings) < 30) or (not isloggedIn);
+
+    if (countColorTolerance(IvyLocation.Color,mainscreen.playerBox,IvyLocation.Tol,IvyLocation.ColSettings) < 30) then
+    begin
+      inc(IvyChopped);
+      sDebug('Succesfully chopped an Ivy');
+    end;
+  end;
+end;
+
+procedure takeBreak();                   //Adapted from The Mayor's VEB Miner
+var
+  H, M, S, breakFor, timeLeft, ran: Integer;
+  breakDuration: TTimeMarker;
+begin
+  if (getSystemTime() >= BreakTime) then
+  begin
+    writeLn('Taking a Break');
+
+    if random(2) = 0 then
+      players[currentPlayer].logout()
+    else
+      players[currentPlayer].exitToLobby();
+
+    ran := round((players[currentPlayer].integers[2] * 60000) * 0.1);
+
+    breakFor := (players[currentPlayer].integers[2] * 60000) + randomRange(ran, -ran);
+    convertTime(breakFor, H, M, S);
+    writeLn('Taking a Break for: ' + toStr(H)+ 'h ' + toStr(M)+ 'm ' + toStr(S)+ 's');
+
+    breakDuration.start();
+
+    repeat
+      timeLeft := breakFor - breakDuration.getTime();
+      convertTime(timeLeft, H, M, S);
+      writeLn('Resuming in: ' + toStr(H)+ 'h ' + toStr(M)+ 'm ' + toStr(S)+ 's');
+      wait(25000 + random(4000));
+    until breakFor < breakDuration.getTime();
+
+    inc(B);
+    loginProcedure();
+    resetBreakTimer();
+  end;
+end;
+
+procedure autoUpdateMe();
+var
+  newFile: integer;
+  newScript, newFilePath: string;
+  online_Version: extended;
+begin
+  sDebug('Checking for updates');
+  online_Version := strToFloat(getPage('http://static.frement.net/proxy.php?u=https://raw.githubusercontent.com/SRLFady/IvyChopper/master/VERSION.txt'));
+  sDebug('Local Version ' + toStr(Local_Version) + ', Online Version: ' + toStr(online_Version)+'.');
+
+  if online_Version > Local_Version then
+  begin
+    writeLn('Downloading the latest script version from GitHub');
+    newScript := getPage('http://static.frement.net/proxy.php?u=https://raw.githubusercontent.com/SRLFady/IvyChopper/master/IvyChopper.simba');
+    newFilePath := scriptPath+ 'Fady Ivy Chop-O-Matic V' + toStr(online_Version) +'.simba';
+    newFile := rewriteFile(newFilePath, true);
+
+    if not writeFileString(newFile, newScript) then
+    begin
+      writeLn('Could not write to ' + newFilePath);
+      terminatescript();
+    end;
+
+    closeFile(newFile);
+    writeLn('Latest script downloaded to ' + newFilePath);
+    writeLn('Please use the new one to run the latest version!');
+    terminateScript();
+  end else
+    sDebug('Local version is already up to date!');
+end;
+
+procedure chopLoop();
+begin
+  if not isLoggedIn() then
+    loginProcedure();
+
+  ivyChopper();
+  takeBreak();
+  progressReport();
+end;
+
+begin
+  clearDebug();
+  initPlayerForm();
+  runPlayerForm();
+  if (not playerForm.isScriptReady) then
+    exit;
+  declarePlayers();
+  //autoUpdateMe();
+  smartShowConsole := false;
+  smartEnableDrawing := true;
+  disableSRLDebug := players[currentPlayer].booleans[0];
+  setupSRL();
+
+  whichLocation();
+
+  writeLn(players[currentPlayer].strings[0]);
+  sDebug('Chopping Ivy at the '+IvyLocation.LocationName+' Location');
+
+  loginProcedure();
+  resetBreakTimer();
+  ScriptTimer.start();
+
+  repeat
+    chopLoop
+  until false;
+end.
