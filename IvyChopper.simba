@@ -343,7 +343,7 @@ begin
   if (not playerForm.isScriptReady) then
     exit;
   declarePlayers();
-  //autoUpdateMe();
+  autoUpdateMe();
   smartShowConsole := false;
   smartEnableDrawing := true;
   disableSRLDebug := players[currentPlayer].booleans[0];
